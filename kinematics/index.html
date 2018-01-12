@@ -22,7 +22,15 @@
         position: absolute;
         bottom: 0px;
         padding: 5px;
-      }   
+      }  
+
+      #lerpmode {
+        color: #ffffff;
+        background-color: #990000;
+        position: absolute;
+        bottom: 25px;
+        padding: 5px;
+      }  
 
       #info {
         position: absolute;
@@ -31,7 +39,6 @@
       }
 
       a {
-
         color: #a06851;
       }
 
@@ -41,7 +48,8 @@
 
   <div id="container"><br /><br /><br /><br /><br />Loading...</div>
   <div id="info">Ammo.js Kinematic Testing; WASD: move 'local' cube; Q: toggle lerping on 'remote' cube; E: switch between lerping and cherping for position</div>
-  <div id="latency">Simulated latency: 0.0 m/s</div>
+  <div id="latency">Simulated latency: 0.0 m/s with 0 % packet loss</div>
+  <div id="lerpmode">Interpolation: hermite</div>
 
   <script src="../builds/ammo.js"></script>
 
@@ -70,7 +78,7 @@
       var ZERO_QUATERNION = new THREE.Quaternion(0, 0, 0, 1);
 
       // Graphics variables
-      var container, stats, latency;
+      var container, stats, latency, lerpmode;
       var camera, controls, scene, renderer;
       var terrainMesh, texture;
       var clock = new THREE.Clock();
@@ -96,6 +104,7 @@
         "KeyS":'back',
         "KeyA":'left',
         "KeyD":'right',
+        "Space":'up',
         "KeyQ":'toggle_lerp',
         "KeyE":'lerp_type'
       };
@@ -107,12 +116,20 @@
       var remotebox, localbox, floor;
       var isColliding = {};
 
+      var meshes = {};
+
       var defaultColor = 0xfca400;
       var collidingColor = 0x990000;
       var staticColor = 0x999999;
 
       var remotePosition = new THREE.Vector3();
       var remoteRotation = new THREE.Quaternion();
+      var remoteVelocity = new THREE.Vector3();
+
+      var arrowHelper;
+
+      var raycaster = new THREE.Raycaster();
+      var mouse = new THREE.Vector2();
 
       // - Functions -
 
@@ -120,6 +137,7 @@
 
         container = document.getElementById( 'container' );
         latency = document.getElementById( 'latency' );
+        lerpmode = document.getElementById( 'lerpmode' );
 
         scene = new THREE.Scene();
 
@@ -142,6 +160,10 @@
         dirLight.position.set( 10, 10, 5 );
         scene.add( dirLight );
 
+        arrowHelper = new THREE.ArrowHelper(new THREE.Vector3(0,1,0), new THREE.Vector3(0,0,0), 10, 0x0000ff);
+
+        scene.add(arrowHelper);
+
         container.innerHTML = "";
 
         container.appendChild( renderer.domElement );
@@ -154,6 +176,8 @@
         window.addEventListener( 'resize', onWindowResize, false );
         window.addEventListener( 'keydown', keydown);
         window.addEventListener( 'keyup', keyup);
+
+        window.addEventListener( 'mousemove', onMouseMove, false );
       }
 
       function onWindowResize() {
@@ -184,9 +208,12 @@
         physicsWorld.stepSimulation( dt, 10 );
         controls.update( dt );
         renderer.render( scene, camera );
-        checkCollisions();
         time += dt;
         stats.update();
+
+        checkCollisions();
+        remoteUpdate(dt);
+        cherpedVector3.update(dt);
       }
 
       function checkCollisions() {
@@ -233,7 +260,7 @@
           return false;
         }
       }
-      
+
       function keydown(e) {
         if(keysActions[e.code]) {
           actions[keysActions[e.code]] = true;
@@ -241,6 +268,58 @@
           e.stopPropagation();
           return false;
         }
+      }
+
+      function onMouseMove( event ) {
+        // calculate mouse position in normalized device coordinates
+        // (-1 to +1) for both components
+
+        mouse.x = ( event.clientX / window.innerWidth ) * 2 - 1;
+        mouse.y = - ( event.clientY / window.innerHeight ) * 2 + 1;
+      }
+
+      function createSphere(pos, quat, r, mass, friction, color, syncFunction) {
+        var material = new THREE.MeshPhongMaterial( { color: color } );
+        var shape = new THREE.SphereGeometry(r, 32, 32);
+        var geometry = new Ammo.btSphereShape(r);
+
+        if(!mass) mass = 0;
+        if(!friction) friction = 1;
+
+        var mesh = new THREE.Mesh(shape, material);
+        mesh.position.copy(pos);
+        mesh.quaternion.copy(quat);
+        scene.add( mesh );
+
+        var transform = new Ammo.btTransform();
+        transform.setIdentity();
+        transform.setOrigin(new Ammo.btVector3(pos.x, pos.y, pos.z));
+        transform.setRotation(new Ammo.btQuaternion(quat.x, quat.y, quat.z, quat.w));
+        var motionState = new Ammo.btDefaultMotionState(transform);
+
+        var localInertia = new Ammo.btVector3(0, 0, 0);
+        geometry.calculateLocalInertia(mass, localInertia);
+
+        var rbInfo = new Ammo.btRigidBodyConstructionInfo(mass, motionState, geometry, localInertia);
+        var body = new Ammo.btRigidBody(rbInfo);
+
+        body.setFriction(friction);
+
+        physicsWorld.addRigidBody( body );
+
+        if (mass > 0) {
+          body.setActivationState(DISABLE_DEACTIVATION);
+          // Sync physics and graphics
+          function sync(dt) {
+            syncFunction(body, mesh, dt);
+          }
+
+          syncList.push(sync);
+        }
+
+        meshes[body.ptr] = mesh;
+
+        return body;
       }
 
       function createBox(pos, quat, w, l, h, mass, friction, color, syncFunction) {
@@ -282,19 +361,25 @@
           syncList.push(sync);
         }
 
+        meshes[body.ptr] = mesh;
+
         return body;
       }
         
       function createObjects() {
-        floor = createBox(new THREE.Vector3(0, -0.5, 0), ZERO_QUATERNION, 75, 1, 75, 0, 2, staticColor);
+        floor = createBox(new THREE.Vector3(0, -0.5, 0), ZERO_QUATERNION, 200, 1, 200, 0, 2, staticColor);
+
+        floor.setRestitution(0.5);
 
         var shouldLerp = true;
         var wasShouldLerpPressed = false;
 
-        var lerpType = true;
+        var lerpType = false;
         var wasLerpTypePressed = false;
 
+        // remotebox = createSphere(new THREE.Vector3(10,15,0), ZERO_QUATERNION, 2.5, 1,1, defaultColor,
         remotebox = createBox(new THREE.Vector3(10,15,0), ZERO_QUATERNION, 5,5,5,1,1, defaultColor,
+
           function sync(body, mesh, dt) {
 
             if (actions.toggle_lerp && !wasShouldLerpPressed) {
@@ -307,6 +392,8 @@
             if (actions.lerp_type && !wasLerpTypePressed) {
               wasLerpTypePressed = true;
               lerpType = !lerpType;
+              var type = lerpType ? 'linear' : 'hermite';
+              lerpmode.innerHTML = 'Interpolation: ' + type;
             } else if (!actions.lerp_type) {
               wasLerpTypePressed = false;
             }
@@ -319,12 +406,12 @@
               var p = TRANSFORM_AUX.getOrigin();
               var q = TRANSFORM_AUX.getRotation();
 
-              if (body.getCollisionFlags() == 2 && (lerpedVector3.isSet() || cherpedVector3.isSet()) && shouldLerp) {
+              if (body.getCollisionFlags() == 2 && (lerpedVector3.isSet() || cherpedVector3.isSet()) && shouldLerp)   {
 
-                var targetVector3;
-                if (lerpType) {
+                var targetVector3 = remotePosition;
+                if (lerpType && lerpedVector3.isSet()) {
                   targetVector3 = lerpedVector3.getCurrentTarget();
-                } else {
+                } else if (cherpedVector3.isSet()) {
                   targetVector3 = cherpedVector3.getCurrentTarget();
                 }
 
@@ -355,6 +442,7 @@
 
         var force = 1500;
 
+        // localbox = createSphere(new THREE.Vector3(0,5,0), ZERO_QUATERNION, 2.5, 100,1, defaultColor,
         localbox = createBox(new THREE.Vector3(0,5,0), ZERO_QUATERNION, 5,5,5,100,1, defaultColor,
           function sync(body, mesh, dt) {
 
@@ -371,6 +459,9 @@
             }
             if (actions.right) {
               appliedForce = new Ammo.btVector3(-force, 0, 0);
+            }
+            if (actions.up) {
+              appliedForce = new Ammo.btVector3(0, force, 0);
             }
 
             body.applyForce(appliedForce, new Ammo.btVector3(0, 0, 0));
@@ -391,14 +482,82 @@
           }
         );
 
+        localbox.setRestitution(1.0);
+
+      }
+
+      var t = 0;
+      function remoteUpdate(delta) {
+        // mouse cursor demo //
+        // var lastPosition = new THREE.Vector3();
+        // lastPosition.copy(remotePosition);
+
+        // raycaster.setFromCamera( mouse, camera );
+        // var intersect = raycaster.intersectObject( meshes[floor.ptr] );
+        // if (intersect[0]) {
+        //   var point = intersect[0].point;
+        //   remotePosition.set(point.x, remotePosition.y, point.z)
+        // }
+
+        // remoteVelocity.subVectors(remotePosition, lastPosition);
+        // remoteVelocity.divideScalar(delta);
+
+        // arrowHelper.position.copy(remotePosition);
+        // arrowHelper.setDirection(remoteVelocity);
+        // arrowHelper.setLength(remoteVelocity.length())
+
+        // ---
+
+        // follow you demo //
+        var ms = localbox.getMotionState();
+        if (ms) {
+          ms.getWorldTransform(TRANSFORM_AUX);
+
+          var p = TRANSFORM_AUX.getOrigin();
+          var q = TRANSFORM_AUX.getRotation();
+
+          remotePosition.set(p.x() + 10, p.y(), p.z());
+          var vel = localbox.getLinearVelocity();
+          remoteVelocity.set(vel.x(), vel.y(), vel.z());
+          remoteRotation.set(q.x(), q.y(), q.z(), q.w());
+
+          arrowHelper.position.copy(new THREE.Vector3(p.x(), p.y(), p.z()));
+          arrowHelper.setDirection(remoteVelocity);
+          arrowHelper.setLength(remoteVelocity.length())
+        }
+
+        var lastPosition = new THREE.Vector3();
+        lastPosition.copy(remotePosition);
+
+        // ---
+
+        // orbit demo //
+        // var period = 2;
+        // t += delta;
+        // t %= period;
+        // var r = 10;
+        // var angle = THREE.Math.lerp(0, 2 * Math.PI, t/period);
+        // var x = r * Math.cos(angle);
+        // var z = r * Math.sin(angle);
+
+        // var speed = (2 * Math.PI * r)/period;
+
+        // remotePosition.set(x, remotePosition.y, z);
+        // arrowHelper.position.copy(remotePosition);
+
+        // var sign = angle < Math.PI ? -1 : 1;
+
+        // var velocity = new THREE.Vector3(sign, 0, -sign/Math.tan(angle));
+        // velocity.normalize();
+        // velocity.multiplyScalar(speed);
+
+        // arrowHelper.setDirection(velocity);
+
+        // remoteRotation.setFromAxisAngle(new THREE.Vector3(0,1,0), angle);
+
       }
 
       function start() {
-
-        var arrowHelper = new THREE.ArrowHelper(new THREE.Vector3(0,1,0), new THREE.Vector3(0,0,0), 10, 0x0000ff);
-
-        scene.add(arrowHelper);
-
         window.setTimeout(function() {
           physicsWorld.removeRigidBody(remotebox);
           remotebox.setMassProps(0, new Ammo.btVector3(0,0,0));
@@ -406,9 +565,10 @@
           remotebox.setActivationState(4);
           physicsWorld.addRigidBody(remotebox);
 
+          var packetLossRate = 0.05;
+
           var updateFreq = 50 + Math.random() * 50;
           var t = 0;
-          var lastTime = Date.now();
 
           var ms = remotebox.getMotionState();
           if (ms) {
@@ -416,44 +576,23 @@
             remotePosition.setY(p.y());
           }
 
-          var loop = function() {
+          cherpedVector3.setTarget(remotePosition, remoteVelocity);
 
-            var lastPosition = new THREE.Vector3();
-            lastPosition.copy(remotePosition);
+          var remoteLoop = function() {
+            if (Math.random() < packetLossRate) {
+            } else {
+              cherpedVector3.setTarget(remotePosition, remoteVelocity);
+              lerpedVector3.setTarget(remotePosition, updateFreq);
+              slerpedQuaternion.setTarget(remoteRotation, updateFreq)
+            }
 
-            var dt = Date.now() - lastTime;
-            var speed = 5000;
-            t = dt % speed;
-            var r = 10;
-            var angle = THREE.Math.lerp(0, 2 * Math.PI, t/speed);
-            var x = r * Math.cos(angle);
-            var z = r * Math.sin(angle);
+            updateFreq = 100 + Math.random() * 15;
 
-            var circularSpeed = (2 * Math.PI * r)/speed;
-
-            remotePosition.set(x, remotePosition.y, z);
-            arrowHelper.position.copy(remotePosition);
-
-            var direction = new THREE.Vector3();
-            direction.subVectors(remotePosition, lastPosition);
-            var velocity = direction.normalize();
-            arrowHelper.setDirection(velocity);
-            velocity.multiplyScalar(circularSpeed);
-
-            cherpedVector3.setTarget(remotePosition, velocity, updateFreq);
-
-            lerpedVector3.setTarget(remotePosition, updateFreq);
-
-            remoteRotation.setFromAxisAngle(new THREE.Vector3(0,1,0), angle);
-            slerpedQuaternion.setTarget(remoteRotation, updateFreq)
-
-            updateFreq = 50 + Math.random() * 50;
-
-            latency.innerHTML = 'Simulated latency: ' + Math.round(updateFreq*100)/100 + ' ms';
-            window.setTimeout(loop, updateFreq);
+            latency.innerHTML = 'Simulated latency: ' + Math.round(updateFreq*100)/100 + ' ms with ' + packetLossRate * 100 + '% packet loss';
+            window.setTimeout(remoteLoop, updateFreq);
           };
 
-          window.setTimeout(loop, updateFreq);
+          window.setTimeout(remoteLoop, updateFreq);
         }, 4000);
       }
 

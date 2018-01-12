@@ -1,45 +1,102 @@
-//Cubic Hermite Interpolation for Vector3
-var CherpedVector3 = (function () {
-  var currentTargetVector3 = new THREE.Vector3();
-  var lastTargetVector3 = new THREE.Vector3();
-  var currentTargetVelocity = new THREE.Vector3();
-  var lastTargetVelocity = new THREE.Vector3();
-  var lerpDuration = null;
-  var lastSet = null;
-  var set = false;
+//Cubic Hermite Interpolation for 
+//Ported from: https://github.com/empyreanx/godot-snapshot-interpolation-demo
+var CherpedVector3 = (function (bt = 0.15) {
+  const BUFFERING = 0;
+  const PLAYING = 1;
+
+  let initialized = false;
+  let set = false;
+  let state = BUFFERING;
+  let buffer = [];
+  let bufferTime = bt;
+  let time = 0;
+  let mark = 0;
+  let lastPosition = new THREE.Vector3();
+  let lastVelocity = new THREE.Vector3();
+  let lastTime = 0.0;
+  let pos = new THREE.Vector3();
+
+  function hermite(t, p1, p2, v1, v2) {
+    const t2 = t * t;
+    const t3 = t * t * t;
+    const a = 2*t3 - 3*t2 + 1;
+    const b = -2*t3 + 3*t2;
+    const c = t3 - 2*t2 + t;
+    const d = t3 - t2;
+
+    let retVector = new THREE.Vector3();
+    retVector.add(p1.clone().multiplyScalar(a));
+    retVector.add(p2.clone().multiplyScalar(b));
+    retVector.add(v1.clone().multiplyScalar(c));
+    retVector.add(v2.clone().multiplyScalar(d));
+    return retVector;
+  }
 
   return {
     isSet: function() {
       return set;
     },
 
-    setTarget: function(targetVector3, targetVelocity, duration) {
-      lastTargetVector3.copy(this.isSet() ? currentTargetVector3 : targetVector3);
-      currentTargetVector3.copy(targetVector3);
-      lastTargetVelocity.copy(this.isSet() ? currentTargetVelocity : targetVelocity);
-      currentTargetVelocity.copy(targetVelocity);
-      set = true;
-      lastSet = Date.now();
-      lerpDuration = duration;
+    reset: function() {
+      initialized = false;
+      set = false;
+      state = BUFFERING;
+      buffer = [];
+      bufferTime = bt;
+      time = 0;
+      mark = 0;
+      lastPosition = new THREE.Vector3();
+      lastVelocity = new THREE.Vector3();
+      lastTime = 0.0;
+      pos = new THREE.Vector3();
+    },
+
+    setTarget: function(pos, vel) {
+      buffer.push({pos: pos, vel: vel, time: time})
+    },
+
+    update: function(delta) {
+      if (state == BUFFERING) {
+        if (buffer.length > 0 && !initialized) {
+          lastPosition = buffer[0].pos;
+          lastVelocity = buffer[0].vel;
+          lastTime = buffer[0].time;
+          initialized = true;
+          buffer.shift();
+        }
+
+        if (buffer.length > 0 && initialized && time > bufferTime) {
+          state = PLAYING;
+        }
+      } else if (state == PLAYING) {
+
+        //Purge buffer of expired frames
+        while (buffer.length > 0 && mark > buffer[0].time) {
+          lastPosition = buffer[0].pos;
+          lastVelocity = buffer[0].vel;
+          lastTime = buffer[0].time;
+          buffer.shift();
+        }
+        
+        if (buffer.length > 0 && buffer[0].time > 0) {
+          const delta_time = buffer[0].time - lastTime;
+          const alpha = (mark - lastTime) / (delta_time);
+          
+          //Use cubic Hermite interpolation to determine position
+          pos = hermite(alpha, lastPosition, buffer[0].pos, 
+          lastVelocity.multiplyScalar(delta_time), buffer[0].vel.multiplyScalar(delta_time))
+          set = true;
+        }
+
+         mark += delta;
+      }
+
+      if (initialized)
+        time += delta;
     },
 
     getCurrentTarget: function() {
-      if (!set) return new THREE.Vector3();
-      if (lastTargetVector3 == currentTargetVector3) return currentTargetVector3;
-      var t = THREE.Math.clamp((Date.now() - lastSet) / lerpDuration, 0, 1);
-
-      var t2 = t * t;
-      var t3 = t * t * t;
-      var a = 1 - 3*t2 + 2*t3;
-      var b = t2 * (3 - 2*t);
-      var c = t * (t -1) * (t - 1);
-      var d = t2 * (t - 1);
-      var retVector = new THREE.Vector3();
-      retVector.add(lastTargetVector3.clone().multiplyScalar(a));
-      retVector.add(currentTargetVector3.clone().multiplyScalar(b));
-      retVector.add(lastTargetVelocity.clone().multiplyScalar(c));
-      retVector.add(currentTargetVelocity.clone().multiplyScalar(d));
-      return retVector;
+      return pos;
     }
   };
 
