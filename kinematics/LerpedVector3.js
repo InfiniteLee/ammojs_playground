@@ -1,10 +1,10 @@
 //Linear Interpolation for Vector3
-var LerpedVector3 = (function () {
-  var currentTarget = new THREE.Vector3();
-  var lastTarget = new THREE.Vector3();
-  var lerpDuration = null;
-  var lastSet = null;
-  var set = false;
+let LerpedVector3 = (function () {
+  let currentTarget = new THREE.Vector3();
+  let lastTarget = new THREE.Vector3();
+  let lerpDuration = null;
+  let lastSet = null;
+  let set = false;
 
   return {
     isSet: function() {
@@ -22,8 +22,8 @@ var LerpedVector3 = (function () {
     getCurrentTarget: function() {
       if (!this.isSet()) return new THREE.Vector3();
       if (lastTarget == currentTarget) return currentTarget;
-      var alpha = THREE.Math.clamp((Date.now() - lastSet) / lerpDuration, 0, 1);
-      var retVector3 = new THREE.Vector3();
+      const alpha = THREE.Math.clamp((Date.now() - lastSet) / lerpDuration, 0, 1);
+      let retVector3 = new THREE.Vector3();
       retVector3.lerpVectors(lastTarget, currentTarget, alpha);
       return retVector3;
     }

@@ -1,10 +1,10 @@
 //Spherical Linear Interpolation for Quaternions
-var SlerpedQuaternion = (function () {
-  var currentTarget = new THREE.Quaternion();
-  var lastTarget = new THREE.Quaternion();
-  var lerpDuration = null;
-  var lastSet = null;
-  var set = false;
+let SlerpedQuaternion = (function () {
+  let currentTarget = new THREE.Quaternion();
+  let lastTarget = new THREE.Quaternion();
+  let lerpDuration = null;
+  let lastSet = null;
+  let set = false;
 
   return {
     isSet: function() {
@@ -22,9 +22,9 @@ var SlerpedQuaternion = (function () {
     getCurrentTarget: function() {
       if (!this.isSet()) return new THREE.Quaternion();
       if (lastTarget == currentTarget) return currentTarget;
-      var alpha = THREE.Math.clamp((Date.now() - lastSet) / lerpDuration, 0, 1);
+      const alpha = THREE.Math.clamp((Date.now() - lastSet) / lerpDuration, 0, 1);
 
-      var retQuaternion = new THREE.Quaternion();
+      let retQuaternion = new THREE.Quaternion();
       return THREE.Quaternion.slerp(lastTarget, currentTarget, retQuaternion, alpha)
     }
   };

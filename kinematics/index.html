@@ -47,7 +47,7 @@
   <body>
 
   <div id="container"><br /><br /><br /><br /><br />Loading...</div>
-  <div id="info">Ammo.js Kinematic Testing; WASD: move 'local' cube; Q: toggle lerping on 'remote' cube; E: switch between lerping and cherping for position</div>
+  <div id="info">Ammo.js Kinematic Testing; WASD + space: move 'local' cube; Q: toggle lerping on 'remote' cube; E: switch between lerping and cherping for position</div>
   <div id="latency">Simulated latency: 0.0 m/s with 0 % packet loss</div>
   <div id="lerpmode">Interpolation: hermite</div>
 
@@ -125,6 +125,9 @@
       var remotePosition = new THREE.Vector3();
       var remoteRotation = new THREE.Quaternion();
       var remoteVelocity = new THREE.Vector3();
+
+      var lastReceivedPosition = new THREE.Vector3();
+      var lastReceivedRotation = new THREE.Quaternion();
 
       var arrowHelper;
 
@@ -385,6 +388,8 @@
             if (actions.toggle_lerp && !wasShouldLerpPressed) {
               wasShouldLerpPressed = true;
               shouldLerp = !shouldLerp;
+              var type = shouldLerp ? lerpType ? 'linear' : 'hermite' : 'none';
+              lerpmode.innerHTML = 'Interpolation: ' + type;
             } else if (!actions.toggle_lerp) {
               wasShouldLerpPressed = false;
             }
@@ -427,8 +432,8 @@
                 ms.setWorldTransform(transform);
 
               } else if (body.getCollisionFlags() == 2 && !shouldLerp) {
-                mesh.position.set(remotePosition.x, remotePosition.y, remotePosition.z);
-                mesh.quaternion.set(remoteRotation.x, remoteRotation.y, remoteRotation.z, remoteRotation.w);
+                mesh.position.copy(lastReceivedPosition);
+                mesh.quaternion.copy(lastReceivedRotation);
 
               } else {
                 mesh.position.set(p.x(), p.y(), p.z());
@@ -583,7 +588,10 @@
             } else {
               cherpedVector3.setTarget(remotePosition, remoteVelocity);
               lerpedVector3.setTarget(remotePosition, updateFreq);
-              slerpedQuaternion.setTarget(remoteRotation, updateFreq)
+              slerpedQuaternion.setTarget(remoteRotation, updateFreq);
+
+              lastReceivedPosition.copy(remotePosition);
+              lastReceivedRotation.copy(remoteRotation);
             }
 
             updateFreq = 100 + Math.random() * 15;

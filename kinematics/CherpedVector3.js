@@ -1,6 +1,6 @@
-//Cubic Hermite Interpolation for 
+//Cubic Hermite Interpolation for Vector3
 //Ported from: https://github.com/empyreanx/godot-snapshot-interpolation-demo
-var CherpedVector3 = (function (bt = 0.15) {
+let CherpedVector3 = (function (bt = 0.15) {
   const BUFFERING = 0;
   const PLAYING = 1;
 
@@ -14,7 +14,7 @@ var CherpedVector3 = (function (bt = 0.15) {
   let lastPosition = new THREE.Vector3();
   let lastVelocity = new THREE.Vector3();
   let lastTime = 0.0;
-  let pos = new THREE.Vector3();
+  let target = new THREE.Vector3();
 
   function hermite(t, p1, p2, v1, v2) {
     const t2 = t * t;
@@ -48,17 +48,17 @@ var CherpedVector3 = (function (bt = 0.15) {
       lastPosition = new THREE.Vector3();
       lastVelocity = new THREE.Vector3();
       lastTime = 0.0;
-      pos = new THREE.Vector3();
+      target = new THREE.Vector3();
     },
 
-    setTarget: function(pos, vel) {
-      buffer.push({pos: pos, vel: vel, time: time})
+    setTarget: function(target, velocity) {
+      buffer.push({target: target, vel: velocity, time: time})
     },
 
     update: function(delta) {
       if (state == BUFFERING) {
         if (buffer.length > 0 && !initialized) {
-          lastPosition = buffer[0].pos;
+          lastPosition = buffer[0].target;
           lastVelocity = buffer[0].vel;
           lastTime = buffer[0].time;
           initialized = true;
@@ -72,7 +72,7 @@ var CherpedVector3 = (function (bt = 0.15) {
 
         //Purge buffer of expired frames
         while (buffer.length > 0 && mark > buffer[0].time) {
-          lastPosition = buffer[0].pos;
+          lastPosition = buffer[0].target;
           lastVelocity = buffer[0].vel;
           lastTime = buffer[0].time;
           buffer.shift();
@@ -83,7 +83,7 @@ var CherpedVector3 = (function (bt = 0.15) {
           const alpha = (mark - lastTime) / (delta_time);
           
           //Use cubic Hermite interpolation to determine position
-          pos = hermite(alpha, lastPosition, buffer[0].pos, 
+          target = hermite(alpha, lastPosition, buffer[0].target, 
           lastVelocity.multiplyScalar(delta_time), buffer[0].vel.multiplyScalar(delta_time))
           set = true;
         }
@@ -96,7 +96,7 @@ var CherpedVector3 = (function (bt = 0.15) {
     },
 
     getCurrentTarget: function() {
-      return pos;
+      return target;
     }
   };
 
